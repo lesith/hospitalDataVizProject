@@ -1,8 +1,7 @@
 venv
 venv/*
-data
-data/*
+hospital_data
+hospital_data/*
 dataLoading.ipynb
-merged_hospital_data.csv
 hospitalDataRAG.ipynb
 .DS_Store

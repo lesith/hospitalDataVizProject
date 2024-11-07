@@ -45,7 +45,7 @@ def dashboard():
 # Route for generating each plot
 @app.route('/generate/<chart_name>', methods=['POST'])
 def generate_chart(chart_name):
-    # Load data from SQLite database
+    # Load hospital_data from SQLite database
     conn = sqlite3.connect('healthcare_data.db')
     merged_df = pd.read_sql_query('SELECT * FROM encounters', conn)
     conn.close()
