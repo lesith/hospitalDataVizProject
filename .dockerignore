@@ -1,0 +1,8 @@
+venv
+venv/*
+data
+data/*
+dataLoading.ipynb
+merged_hospital_data.csv
+hospitalDataRAG.ipynb
+.DS_Store
