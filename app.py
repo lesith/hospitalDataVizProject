@@ -1,8 +1,15 @@
-from flask import Flask, render_template, request, redirect, url_for
+# app.py
+from flask import Flask, render_template, request, redirect, url_for, Response
 import matplotlib.pyplot as plt
 import pandas as pd
-import os
 import sqlite3
+import uuid
+from functools import wraps
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env
+load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -11,14 +18,39 @@ app = Flask(__name__)
 PLOT_FOLDER = 'static/plots'
 os.makedirs(PLOT_FOLDER, exist_ok=True)
 
+# Get username and password from environment variables
+USERNAME = os.getenv('BASIC_AUTH_USERNAME')
+PASSWORD = os.getenv('BASIC_AUTH_PASSWORD')
+
+# Basic authentication decorator
+def check_auth(username, password):
+    return username == USERNAME and password == PASSWORD
+
+def authenticate():
+    return Response(
+        'Could not verify your access level for that URL.'
+        'You have to login with proper credentials', 401,
+        {'WWW-Authenticate': 'Basic realm="Login Required"'})
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
+
 # Helper function to save plots as images
 def save_plot(filename):
-    filepath = os.path.join(PLOT_FOLDER, filename)
+    unique_filename = f"{filename}_{uuid.uuid4().hex}.png"
+    filepath = os.path.join(PLOT_FOLDER, unique_filename)
     plt.savefig(filepath)
     plt.clf()
     return filepath
 
 @app.route('/')
+@requires_auth
 def dashboard():
     # Serve the saved images
     plots = {
@@ -45,10 +77,26 @@ def dashboard():
 # Route for generating each plot
 @app.route('/generate/<chart_name>', methods=['POST'])
 def generate_chart(chart_name):
+    # Whitelist of allowed chart names
+    allowed_charts = [
+        'age_distribution', 'gender_breakdown', 'marital_status',
+        'encounter_types', 'encounter_duration', 'procedure_frequency',
+        'encounter_cost_distribution', 'cost_by_encounter_type',
+        'payer_coverage', 'encounters_by_location', 'reasons_for_encounters',
+        'procedure_age_groups', 'encounters_over_time', 'peak_hours',
+        'claims_costs_by_payer', 'out_of_pocket_costs'
+    ]
+
+    # Check if the requested chart is allowed
+    if chart_name not in allowed_charts:
+        return "Chart not found", 404
+
     # Load hospital_data from SQLite database
-    conn = sqlite3.connect('healthcare_data.db')
-    merged_df = pd.read_sql_query('SELECT * FROM encounters', conn)
-    conn.close()
+    try:
+        with sqlite3.connect('healthcare_data.db') as conn:
+            merged_df = pd.read_sql_query('SELECT * FROM encounters', conn)
+    except Exception as e:
+        return f"An error occurred while accessing the database: {str(e)}", 500
 
     if chart_name == 'age_distribution':
         plt.hist(merged_df['Age'].dropna(), bins=20, edgecolor='black')

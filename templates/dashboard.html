@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Healthcare Data Dashboard</title>
+    <title>Hospital Data Dashboard</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -63,6 +63,12 @@
             }
         }
     </style>
+    <script>
+        function showLoading(button) {
+            button.disabled = true;
+            button.innerHTML = 'Generating...';
+        }
+    </script>
 </head>
 <body>
     <h1>Healthcare Data Dashboard</h1>
@@ -70,9 +76,9 @@
         {% for plot_name, plot_path in plots.items() %}
             <div class="plot">
                 <h2>{{ plot_name.replace('_', ' ').title() }}</h2>
-                <img src="{{ plot_path }}" alt="{{ plot_name }}">
+                <img src="{{ plot_path }}?{{ loop.index }}" alt="{{ plot_name }}">
                 <br><br>
-                <form method="post" action="/generate/{{ plot_name }}">
+                <form method="post" action="/generate/{{ plot_name }}" onsubmit="showLoading(this.querySelector('button'))">
                     <button type="submit">Generate {{ plot_name.replace('_', ' ').title() }}</button>
                 </form>
             </div>
