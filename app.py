@@ -1,5 +1,6 @@
 # app.py
 from flask import Flask, render_template, request, redirect, url_for, Response, jsonify
+from flask_caching import Cache
 import matplotlib.pyplot as plt
 import pandas as pd
 import sqlite3
@@ -16,6 +17,20 @@ load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Load Redis configuration from environment variables
+CACHE_TYPE = os.getenv('CACHE_TYPE', 'redis')
+CACHE_REDIS_HOST = os.getenv('CACHE_REDIS_HOST', 'redis')
+CACHE_REDIS_PORT = int(os.getenv('CACHE_REDIS_PORT', 6379))
+CACHE_DEFAULT_TIMEOUT = int(os.getenv('CACHE_DEFAULT_TIMEOUT', 3600))
+
+# Configure cache
+cache = Cache(app, config={
+    'CACHE_TYPE': CACHE_TYPE,
+    'CACHE_REDIS_HOST': CACHE_REDIS_HOST,
+    'CACHE_REDIS_PORT': CACHE_REDIS_PORT,
+    'CACHE_DEFAULT_TIMEOUT': CACHE_DEFAULT_TIMEOUT
+})
 
 # Define the folder to save plots
 PLOT_FOLDER = 'static/plots'
@@ -54,6 +69,7 @@ def save_plot(filename):
 
 @app.route('/')
 @requires_auth
+@cache.cached(timeout=None)
 def dashboard():
     # Serve the saved images
     plots = {
@@ -80,6 +96,7 @@ def dashboard():
 
 @app.route('/chat', methods=['POST'])
 @requires_auth
+# do not cache
 def chat():
     query_text = request.form['query_text']
     response = chat_query(query_text)
@@ -87,13 +104,14 @@ def chat():
 
 
 # Chat query function
+@cache.memoize(timeout=None)  # Cache the response indefinitely
 def chat_query(query_text):
     # Prepare the DB
     embedding_function = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
     db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding_function)
 
     # Search the DB with similarity filtering
-    results = db.similarity_search_with_relevance_scores(query_text, k=5)
+    results = db.similarity_search_with_relevance_scores(query_text, k=10)
     print(f"Retrieved results: {results}")
 
     # Adjusted Similarity Threshold
@@ -175,6 +193,7 @@ def chat_query(query_text):
 
 # Route for generating each plot
 @app.route('/generate/<chart_name>', methods=['POST'])
+@cache.memoize(timeout=None)
 def generate_chart(chart_name):
     # Whitelist of allowed chart names
     allowed_charts = [
