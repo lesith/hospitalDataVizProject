@@ -1,12 +1,15 @@
 # app.py
-from flask import Flask, render_template, request, redirect, url_for, Response
+from flask import Flask, render_template, request, redirect, url_for, Response, jsonify
 import matplotlib.pyplot as plt
 import pandas as pd
 import sqlite3
-import uuid
 from functools import wraps
 from dotenv import load_dotenv
 import os
+import json
+from langchain_community.vectorstores import Chroma
+from langchain.prompts.chat import ChatPromptTemplate
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 
 # Load environment variables from .env
 load_dotenv()
@@ -21,6 +24,7 @@ os.makedirs(PLOT_FOLDER, exist_ok=True)
 # Get username and password from environment variables
 USERNAME = os.getenv('BASIC_AUTH_USERNAME')
 PASSWORD = os.getenv('BASIC_AUTH_PASSWORD')
+CHROMA_PATH = os.getenv('CHROMA_PATH')
 
 # Basic authentication decorator
 def check_auth(username, password):
@@ -43,8 +47,7 @@ def requires_auth(f):
 
 # Helper function to save plots as images
 def save_plot(filename):
-    unique_filename = f"{filename}_{uuid.uuid4().hex}.png"
-    filepath = os.path.join(PLOT_FOLDER, unique_filename)
+    filepath = os.path.join(PLOT_FOLDER, filename)
     plt.savefig(filepath)
     plt.clf()
     return filepath
@@ -73,6 +76,102 @@ def dashboard():
     }
 
     return render_template('dashboard.html', plots=plots)
+
+
+@app.route('/chat', methods=['POST'])
+@requires_auth
+def chat():
+    query_text = request.form['query_text']
+    response = chat_query(query_text)
+    return jsonify({'query': query_text, 'response': response})
+
+
+# Chat query function
+def chat_query(query_text):
+    # Prepare the DB
+    embedding_function = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding_function)
+
+    # Search the DB with similarity filtering
+    results = db.similarity_search_with_relevance_scores(query_text, k=5)
+    print(f"Retrieved results: {results}")
+
+    # Adjusted Similarity Threshold
+    if len(results) == 0:
+        print("Unable to find matching results.")
+        return "Unable to find matching results."
+
+    # Check if any results exceed a set threshold or if the best available should be used
+    threshold = 0.7  # change as necessary
+    relevant_results = [result for result in results if result[1] >= threshold]
+
+    if len(relevant_results) == 0:
+        print("No results exceed the similarity threshold. Returning the best available match.")
+        relevant_results = [results[0]]  # Return the best available match if no results exceed threshold
+
+    # Prepare context from the results
+    context_texts = []
+    document_types = []
+    data_sources = []
+    field_descriptions_list = []
+    patient_ids = []
+
+    for doc, _score in relevant_results:
+        context_texts.append(doc.page_content)
+        document_types.append(doc.metadata.get("document_type", "unknown"))
+        data_sources.append(doc.metadata.get("data_source", "unknown"))
+        if "field_descriptions" in doc.metadata:
+            field_descriptions_list.append(json.loads(doc.metadata["field_descriptions"]))
+        if "PATIENT" in doc.metadata:
+            patient_ids.append(doc.metadata["PATIENT"])
+
+    # Compile context with separators
+    context_text = "\n\n---\n\n".join(context_texts)
+    document_type_context = ", ".join(set(document_types))
+    data_source_context = ", ".join(set(data_sources))
+    field_descriptions_context = json.dumps(field_descriptions_list, indent=2) if field_descriptions_list else "None"
+    patient_ids_context = ", ".join(set(patient_ids)) if patient_ids else "None"
+
+    # Update the prompt template with new metadata
+    PROMPT_TEMPLATE = """
+        You are an expert data analyst that has access to a hospital dataset that has been denormalized to a single table, 
+        and contains encounter information, patient details, payment amount information, insurer details, 
+        hospital details and procedures performed on patients.
+
+        Answer user question based on the following context:
+
+        {context}
+
+        ---
+
+        Metadata Information:
+        Document Type: {document_type}
+        Data Source: {data_source}
+        Field Descriptions: {field_descriptions}
+        Patient Identifiers: {patient_ids}
+
+        ---
+
+        Answer this question based on the above context: {question}
+        """
+
+    prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
+    prompt = prompt_template.format(
+        context=context_text,
+        question=query_text,
+        document_type=document_type_context,
+        data_source=data_source_context,
+        field_descriptions=field_descriptions_context,
+        patient_ids=patient_ids_context
+    )
+
+    # Query the model
+    model = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
+    response_text = model.predict(prompt)
+
+    # Compile and return response
+    return response_text
+
 
 # Route for generating each plot
 @app.route('/generate/<chart_name>', methods=['POST'])
