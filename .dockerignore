@@ -4,4 +4,5 @@ hospital_data
 hospital_data/*
 dataLoading.ipynb
 hospitalDataRAG.ipynb
+mergedHospitalDataRAG.ipynb
 .DS_Store
